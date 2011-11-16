@@ -2,8 +2,24 @@ How to Serialize Device State with QC
 ======================================
 
 This document describes how to implement save/restore of a device in QEMU using
-the QC IDL compiler.  For the rest, of the document, the following simple
-device will be used as an example.
+the QC IDL compiler.  The QC IDL compiler makes it easier to support live
+migration in devices by converging the serialization description with the
+device type declaration.  It has the following features:
+
+ 1. Single description of device state and how to serialize
+
+ 2. Fully inclusive serialization description--fields that aren't serialized
+    are explicitly marked as such including the reason why.
+
+ 3. Optimized for the common case.  Even without any special annotations,
+    many devices will Just Work out of the box.
+
+ 4. Build time schema definition.  Since QC runs at build time, we have full
+    access to the schema during the build which means we can fail the build if
+    the schema breaks.
+
+For the rest, of the document, the following simple device will be used as an
+example.
 
     typedef struct SerialDevice {
         SysBusDevice parent;
