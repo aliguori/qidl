@@ -263,6 +263,16 @@ def parse_type(la, index):
         next, _ = expect(la, next, 'operator', ')')
 
         ret['version'] = version
+    elif choice(la, next, 'symbol', '_size_is'):
+        next += 1
+
+        next, _ = expect(la, next, 'operator', '(')
+        next, array_size = expect(la, next, 'symbol')
+        next, _ = expect(la, next, 'operator', ')')
+
+        ret['is_array'] = True
+        ret['array_size'] = 's->%s' % array_size
+        
 
     if choice(la, next, 'operator', '*'):
         next += 1
@@ -274,8 +284,11 @@ def parse_type(la, index):
     if choice(la, next, 'operator', '['):
         next += 1
 
-        ret['is_array'] = True
-        ret['array_size'] = la.at(next)[1]
+        if not ret.has_key('is_array'):
+            ret['is_array'] = True
+            ret['array_size'] = la.at(next)[1]
+        else:
+            ret['array_capacity'] = la.at(next)[1]
         next += 1
 
         next, _ = expect(la, next, 'operator', ']')
@@ -352,6 +365,11 @@ def qapi_format(node, is_save=True):
             typename = field['type']
 
         if field.has_key('is_array'):
+            if field.has_key('array_capacity'):
+                print '    if (%(array_size)s > %(array_capacity)s) {' % field
+                print '        error_set(errp, QERR_FAULT, "Array size greater than capacity.");'
+                print '    }'
+                print '    %(array_size)s = MIN(%(array_size)s, %(array_capacity)s);' % field
             print '    visit_start_array(v, "%s", errp);' % (field['variable'])
             print '    for (size_t i = 0; i < %s; i++) {' % (field['array_size'])
             print '        visit_type_%s(v, &s->%s[i], NULL, errp);' % (typename, field['variable'])

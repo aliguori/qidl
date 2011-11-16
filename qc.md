@@ -86,7 +86,7 @@ during device construction and never changes.  This means we can add an
         CharDriverState _immutable *chr;
     } SerialDevice;
 
-When reviewing patches that make use of the *_immutable* marker, the following
+When reviewing patches that make use of the **_immutable** marker, the following
 guidelines should be followed to determine if the marker is being used
 correctly.
 
@@ -169,7 +169,7 @@ Consider our *SerialDevice* example.  In QEMU's real *SerialState* device, the
 *thr* register is not saved yet we have not marked it immutable or derived.
 
 The *thr* register is a temporary holding register that the next character to
-transmit is placed in while we want for the next baud cycle.  In QEMU, we
+transmit is placed in while we wait for the next baud cycle.  In QEMU, we
 emulate a very fast baud rate regardless of what guest programs.  This means
 that the contents of the *thr* register only matter for a very small period of
 time (measured in microseconds).
@@ -267,3 +267,65 @@ The first guideline is particularly important.  In the case of QEMU's real
 *SerialDevice*, it would be necessary to add code to set the *thr* register to
 zero after the byte has been successfully transmitted.  Otherwise, it is
 unlikely that it would ever contain the default value.
+
+Arrays
+------
+
+QC has support for multiple types of arrays.  The following sections describe
+the different rules for arrays.
+
+Fixed Sized Arrays
+------------------
+
+A fixed sized array has a size that is known at build time.  A typical example
+would be:
+
+    struct SerialFIFO {
+        uint8_t data[UART_FIFO_LENGTH];
+        uint8_t count;
+        uint8_t itl;
+        uint8_t tail;
+        uint8_t head;
+    };
+
+In this example, *data* is a fixed sized array.  No special annotation is needed
+for QC to marshal this area correctly.  The following guidelines apply to
+fixed sized arrays:
+
+ 1. The size of the array is part of the device ABI.  It should not change
+    without renaming the field.
+
+Variable Sized, Fixed Capacity Arrays
+-------------------------------------
+
+Sometimes it's desirable to have a variable sized array.  QC currently supported
+variable sized arrays provided that the maximum capacity is fixed and part of
+the device structure memory.
+
+A typical example would be a slightly modified version of our above example:
+
+    struct SerialFIFO {
+        uint8_t count;
+        uint8_t _size_is(count) data[UART_FIFO_LENGTH];
+        uint8_t itl;
+        uint8_t tail;
+        uint8_t head;
+    };
+
+In this example, *data* is a variable sized array with a fixed capacity of
+*UART_FIFO_LENGTH*.  When we serialize, we want only want to serialize *count*
+members.
+
+The ABI implications of capacity are a bit more relaxed with variable sized
+arrays.  In general, you can increase or decrease the capacity without breaking
+the ABI although you may cause some instances of migration to fail between
+versions of QEMU with different capacities.
+
+When reviewing variable sized, fixed capacity arrays, keep the following things
+in mind:
+
+ 1. The variable size must occur before the array element in the state
+    structure.
+
+ 2. The capacity can change without breaking the ABI, but care should be used
+    when making these types of changes.
