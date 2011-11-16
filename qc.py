@@ -95,7 +95,7 @@ def lexer(fp):
             token += ch
             yield ('literal', token)
             ch = fp.pop()
-        elif ch in '.><+-*/%&^|!;{},:=()[]~?#':
+        elif ch in '.><+-*/%&^|!;{},:=()[]~?':
             token += ch
             ch = fp.pop()
             tmp_token = token + ch
@@ -173,6 +173,13 @@ def lexer(fp):
                 token += ch
                 ch = fp.pop()
             yield ('whitespace', token)
+        elif ch in '#':
+            token += ch
+            ch = fp.pop()
+            while len(ch) and ch != '\n':
+                token += ch
+                ch = fp.pop()
+            yield ('directive', token)
         else:
             yield ('unknown', ch)
             ch = fp.pop()
@@ -206,13 +213,13 @@ class LookAhead(object):
 
 def skip(c):
     for token, value in c:
-        if token in ['whitespace', 'comment']:
+        if token in ['whitespace', 'comment', 'directive']:
             continue
         yield (token, value)
 
 def expect(la, index, first, second=None):
     if la.at(index)[0] != first:
-        raise Exception("expected '%s', got %s" % (first, la.at(index)[0]))
+        raise Exception("expected '%s', got %s %s" % (first, la.at(index)[0], la.at(index)[1]))
     if second != None:
         if la.at(index)[1] != second:
             raise Exception("expected '%s', got %s" % (second, la.at(index)[1]))

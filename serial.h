@@ -1,3 +1,10 @@
+#ifndef QEMU_SERIAL_H
+#define QEMU_SERIAL_H
+
+#include "hw/hw.h"
+
+#define UART_FIFO_LENGTH    16      /* 16550A Fifo Length */
+
 typedef struct SerialFIFO {
     uint8_t data[UART_FIFO_LENGTH];
     uint8_t count;
@@ -47,3 +54,4 @@ struct SerialState {
     MemoryRegion _immutable io;
 };
 
+#endif
