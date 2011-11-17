@@ -1,4 +1,4 @@
-import sys
+import sys, json
 
 class Input(object):
     def __init__(self, fp):
@@ -67,7 +67,7 @@ def lexer(fp):
                            'for', 'goto', 'if', 'register', 'return', 'signed',
                            'sizeof',
                            'static', 'struct', 'typedef', 'union', 'unsigned',
-                           'void', 'volatile', 'while' ]:
+                           'volatile', 'while' ]:
                 yield (token, token)
             else:
                 yield ('symbol', token)
@@ -233,12 +233,64 @@ def choice(la, index, first, second=None):
             return False
     return True
 
+def parse_markers(la, index, ret):
+    next = index
+
+    found_marker = True
+    while choice(la, next, 'symbol') and found_marker:
+        if choice(la, next, 'symbol', '_derived'):
+            next += 1
+            ret['is_derived'] = True
+        elif choice(la, next, 'symbol', '_immutable'):
+            next += 1
+            ret['is_immutable'] = True
+        elif choice(la, next, 'symbol', '_broken'):
+            next += 1
+            ret['is_broken'] = True
+        elif choice(la, next, 'symbol', '_size_is'):
+            next += 1
+
+            next, _ = expect(la, next, 'operator', '(')
+            next, array_size = expect(la, next, 'symbol')
+            next, _ = expect(la, next, 'operator', ')')
+
+            ret['is_array'] = True
+            ret['array_size'] = 's->%s' % array_size
+        elif choice(la, next, 'symbol', '_default'):
+            next += 1
+
+            next, _ = expect(la, next, 'operator', '(')
+            next, default = expect(la, next, 'literal')
+            next, _ = expect(la, next, 'operator', ')')
+
+            ret['default'] = default
+        elif choice(la, next, 'symbol', '_type_of'):
+            next += 1
+
+            next, _ = expect(la, next, 'operator', '(')
+            next, typename = expect(la, next, 'symbol')
+            next, _ = expect(la, next, 'operator', ')')
+
+            ret['is_container'] = True
+            ret['type_of'] = typename
+        else:
+            found_marker = False
+
+    if ret['type'] in ['GSList']:
+        ret['is_container'] = True
+
+    return (next - index), ret
+
 def parse_type(la, index):
     next = index
 
     typename = ''
+    if choice(la, next, 'const', 'const'):
+        typename += 'const '
+        next += 1
+
     if choice(la, next, 'struct', 'struct'):
-        typename = 'struct '
+        typename += 'struct '
         next += 1
 
     next, rest = expect(la, next, 'symbol')
@@ -246,37 +298,20 @@ def parse_type(la, index):
 
     ret = { 'type': typename }
 
-    if choice(la, next, 'symbol', '_derived'):
-        next += 1
-        ret['is_derived'] = True
-    elif choice(la, next, 'symbol', '_immutable'):
-        next += 1
-        ret['is_immutable'] = True
-    elif choice(la, next, 'symbol', '_broken'):
-        next += 1
-        ret['is_broken'] = True
-    elif choice(la, next, 'symbol', '_version'):
-        next += 1
-
-        next, _ = expect(la, next, 'operator', '(')
-        next, version = expect(la, next, 'literal')
-        next, _ = expect(la, next, 'operator', ')')
-
-        ret['version'] = version
-    elif choice(la, next, 'symbol', '_size_is'):
-        next += 1
-
-        next, _ = expect(la, next, 'operator', '(')
-        next, array_size = expect(la, next, 'symbol')
-        next, _ = expect(la, next, 'operator', ')')
-
-        ret['is_array'] = True
-        ret['array_size'] = 's->%s' % array_size
-        
+    off, ret = parse_markers(la, next, ret)
+    next += off
 
     if choice(la, next, 'operator', '*'):
         next += 1
         ret['is_pointer'] = True
+
+    return (next - index), ret
+
+def parse_var_decl(la, index):
+    next = index
+
+    off, ret = parse_type(la, next)
+    next += off
 
     next, variable = expect(la, next, 'symbol')
     ret['variable'] = variable
@@ -293,16 +328,8 @@ def parse_type(la, index):
 
         next, _ = expect(la, next, 'operator', ']')
 
-    if choice(la, next, 'symbol', '_default'):
-        next += 1
-
-        next, _ = expect(la, next, 'operator', '(')
-        next, default = expect(la, next, 'literal')
-        next, _ = expect(la, next, 'operator', ')')
-
-        ret['default'] = default
-
-    next, _ = expect(la, next, 'operator', ';')
+    off, ret = parse_markers(la, next, ret)
+    next += off
 
     return (next - index), ret
 
@@ -321,9 +348,11 @@ def parse_struct(la, index):
     nodes = []
 
     while not choice(la, next, 'operator', '}'):
-        offset, node = parse_type(la, next)
+        offset, node = parse_var_decl(la, next)
         next += offset
         nodes.append(node)
+
+        next, _ = expect(la, next, 'operator', ';')
 
     next += 1
 
@@ -341,71 +370,55 @@ def parse_typedef(la, index):
 
     return (next - index), { 'typedef': typename, 'type': node }
 
-def qapi_format(node, is_save=True):
-    if node.has_key('typedef'):
-        dtype = node['typedef']
-        fields = node['type']['fields']
-    else:
-        dtype = node['struct']
-        fields = node['fields']
+def parse_func_decl(la, index):
+    next = index
 
-    if is_save:
-        print 'void qc_save_%s(Visitor *v, %s *s, const char *name, Error **errp)' % (dtype, dtype)
-    else:
-        print 'void qc_load_%s(Visitor *v, %s *s, const char *name, Error **errp)' % (dtype, dtype)
-    print '{'
-    print '    visit_start_struct(v, "%s", name, errp);' % (dtype)
-    for field in fields:
-        if field.has_key('is_derived') or field.has_key('is_immutable') or field.has_key('is_broken'):
-            continue
+    off, returns = parse_type(la, index)
+    next += off
 
-        if field['type'].endswith('_t'):
-            typename = field['type'][:-2]
-        else:
-            typename = field['type']
+    next, name = expect(la, next, 'symbol')
+    next, _ = expect(la, next, 'operator', '(')
 
-        if field.has_key('is_array'):
-            if field.has_key('array_capacity'):
-                print '    if (%(array_size)s > %(array_capacity)s) {' % field
-                print '        error_set(errp, QERR_FAULT, "Array size greater than capacity.");'
-                print '    }'
-                print '    %(array_size)s = MIN(%(array_size)s, %(array_capacity)s);' % field
-            print '    visit_start_array(v, "%s", errp);' % (field['variable'])
-            print '    for (size_t i = 0; i < %s; i++) {' % (field['array_size'])
-            print '        visit_type_%s(v, &s->%s[i], NULL, errp);' % (typename, field['variable'])
-            print '    }'
-            print '    visit_end_array(v, errp);'
-        elif field.has_key('default'):
-            if is_save:
-                print '    if (s->%s != %s) {' % (field['variable'], field['default'])
-                print '        visit_type_%s(v, &s->%s, "%s", errp);' % (typename, field['variable'], field['variable'])
-                print '    }'
-            else:
-                print '    s->%s = %s;' % (field['variable'], field['default'])
-                print '    visit_type_%s(v, &s->%s, "%s", NULL);' % (typename, field['variable'], field['variable'])
-        else:
-            print '    visit_type_%s(v, &s->%s, "%s", errp);' % (typename, field['variable'], field['variable'])
-    print '    visit_end_struct(v, errp);'
-    print '}'
-    print
+    args = []
+    while not choice(la, next, 'operator', ')'):
+        if len(args) != 0:
+            next, _ = expect(la, next, 'operator', ',')
 
-if __name__ == '__main__':
-    la = LookAhead(skip(lexer(Input(sys.stdin))))
+        off, arg = parse_var_decl(la, next)
+        next += off
+        args.append(arg)
 
-    index = 0
+    next, _ = expect(la, next, 'operator', ')')
+
+    ret = { 'returns': returns, 'name': name, 'args': args }
+
+    return (next - index), ret
+
+def parse(la, index=0):
+    next = index
+
+    nodes = []
     while True:
         try:
-            if choice(la, index, 'typedef'):
-                offset, node = parse_typedef(la, index)
+            if choice(la, next, 'typedef'):
+                offset, node = parse_typedef(la, next)
+            elif choice(la, next, 'struct'):
+                offset, node = parse_struct(la, next)
             else:
-                offset, node = parse_struct(la, index)
+                offset, node = parse_func_decl(la, next)
 
-            index, _ = expect(la, index + offset, 'operator', ';')
+            next, _ = expect(la, next + offset, 'operator', ';')
         except StopIteration, e:
             break
 
-        qapi_format(node, True)
-        qapi_format(node, False)
+        nodes.append(node)
+
+    return (next - index), nodes
+
+if __name__ == '__main__':
+    la = LookAhead(skip(lexer(Input(sys.stdin))))
+    _, nodes = parse(la)
+    print json.dumps(nodes, sort_keys=True, indent=2)
 
     
 

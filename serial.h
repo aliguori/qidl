@@ -54,4 +54,6 @@ struct SerialState {
     MemoryRegion _immutable io;
 };
 
+void serial_init(SerialState *s, int foo);
+
 #endif
