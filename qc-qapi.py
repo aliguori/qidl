@@ -46,6 +46,7 @@ def qapi_format(node, is_save=True):
                 print '    visit_start_list(v, "%s", errp);' % (field['variable'])
                 print '    while (visit_has_more(v, errp)) {'
                 print '        %s *value = g_malloc0(sizeof(*value));' % (field['type_of'])
+                print '        visit_type_%s(v, value, NULL, errp);' % (field['type_of'])
                 print '        s->%s = g_slist_append(s->%s, value);' % (field['variable'], field['variable'])
                 print '    }'
                 print '    visit_end_list(v, errp);'

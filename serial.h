@@ -1,7 +1,7 @@
 #ifndef QEMU_SERIAL_H
 #define QEMU_SERIAL_H
 
-#include "hw/hw.h"
+#include <stdint.h>
 
 #define UART_FIFO_LENGTH    16      /* 16550A Fifo Length */
 
@@ -53,7 +53,5 @@ struct SerialState {
     struct QEMUTimer _derived *modem_status_poll;
     MemoryRegion _immutable io;
 };
-
-void serial_init(SerialState *s, int foo);
 
 #endif

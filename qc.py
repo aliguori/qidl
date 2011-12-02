@@ -390,7 +390,7 @@ def parse_func_decl(la, index):
 
     next, _ = expect(la, next, 'operator', ')')
 
-    ret = { 'returns': returns, 'name': name, 'args': args }
+    ret = { 'returns': returns, 'func': name, 'args': args }
 
     return (next - index), ret
 
